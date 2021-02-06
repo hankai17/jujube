@@ -132,22 +132,91 @@ int comm_set_nonblock(int fd)
 	return 0;
 }
 
-void init_main_loop() {
+void accept_conn(int lfd, int read_events, int write_event, void *arg)
+{
+    struct sockaddr_in cin;
+    socklen_t len = sizeof(cin);
+    int cfd, i;
+
+    if ((cfd = accept(lfd, (struct sockaddr *)&cin, &len)) == -1) {
+        if (errno != EAGAIN && errno != EINTR) {
+        }
+        printf("%s: accept, %s\n", __func__, strerror(errno));
+        return;
+    }
+
+    do {
+        for (i = 0; i < MAX_EVENTS; i++) {
+            if (g_events[i].status == 0)
+                break;
+        }
+
+        if (i == MAX_EVENTS) {
+            printf("%s: max connect limit[%d]\n", __func__, MAX_EVENTS);
+            break;
+        }
+
+        int flag = 0;
+        if ((flag = fcntl(cfd, F_SETFL, O_NONBLOCK)) < 0)
+        {
+            printf("%s: fcntl nonblocking failed, %s\n", __func__, strerror(errno));
+            break;
+        }
+
+         tcp_stream* s = stream_create(cfd, (struct sockaddr*)&cin);
+         s->flags.server_closed = 0;
+
+        struct myevent_s* ev = evget();
+        eventset(ev, cfd, s, data_transfer, ev);
+        eventadd(g_efd, EPOLLIN, ev);
+
+    } while(0);
+
+    printf("new connect [%s:%d][time:%ld], pos[%d]\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port), g_events[i].last_active, i);
+    return;
+}
+
+void init_listensocket(int efd, short port)
+{
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+    fcntl(lfd, F_SETFL, O_NONBLOCK);
+
+    eventset(&g_events[MAX_EVENTS], lfd, NULL, accept_conn, &g_events[MAX_EVENTS]);
+    //g_events[MAX_EVENTS];
+
+    eventadd(efd, EPOLLIN, &g_events[MAX_EVENTS]);
+
+    struct sockaddr_in sin;
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = INADDR_ANY;
+    sin.sin_port = htons(port);
+
+    bind(lfd, (struct sockaddr *)&sin, sizeof(sin));
+    listen(lfd, 128);
+    return;
+}
+
+int init_main_loop() {
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_create(&tid, &attr, main_loop, NULL);
-    return;
+    return tid;
 }
 
 void* main_loop(void* arg) {
-    //pthread_setname_np(pthread_self(), "main_loop");
+    //pthread_setname_np(pthread_self(), "server_main_loop");
     g_efd = epoll_create(MAX_EVENTS + 1);
     if(g_efd <= 0) {
         printf("create efd err %s\n", strerror(errno));
         return 0;
     }
+    
+    int port = 9527;
+    init_listensocket(g_efd, port);
+
     struct epoll_event events[MAX_EVENTS + 1];
     int checkpos = 0, i;
     next_run_time = time(NULL);
@@ -155,11 +224,8 @@ void* main_loop(void* arg) {
 
     while(1) {
         long now = time(NULL);
-        if(sys_start && next_run_time <= now) {
-            unsigned long lbe_ip = 0;
-            unsigned short lbe_port = 80;
-            create_socket(lbe_ip, ntohs(lbe_port));
-            next_run_time = now + 10;
+        while (sys_start != 1) {
+            sleep(1);
         }
 
         for (i = 0; i < 100; i++, checkpos++) {
@@ -174,13 +240,13 @@ void* main_loop(void* arg) {
                 close_stream(&g_events[checkpos], 0);
             }
         }
-
         int nfd = epoll_wait(g_efd, events, MAX_EVENTS + 1, 1000);
         if (nfd < 0 && errno != EINTR) {
             printf("epoll_wait err %s, errno: %d\n", strerror(errno), errno);
             break;
         }
 
+        printf("debug...epoll_wait ret: %d\n", nfd);
         for (i = 0; i < nfd; i++) {
             struct myevent_s *ev = (struct myevent_s *)events[i].data.ptr;
             ev->call_back(ev->fd, events[i].events & EPOLLIN ? 1 : 0, events[i].events & EPOLLOUT ? 1 : 0, ev->arg);
@@ -504,5 +570,12 @@ static void close_stream(myevent_s* ev, int reason) {
 
 int main()
 {
+    mem_module_init();
+    init_main_loop();
+    // do other init
+    sys_start = 1;
+    while(1) {
+        sleep(1);
+    }
     return 0;
 }
