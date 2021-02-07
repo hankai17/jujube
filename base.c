@@ -483,9 +483,10 @@ static void download_set_event_in_out(myevent_s *ev) {
 }
 
 static void close_stream(myevent_s* ev, int reason) {
-    printf("siteinfo_download close_stream\n");
     if(ev != NULL) {
         tcp_stream* s = ev->stream;
+        printf("siteinfo_download close_stream, s->reply_body_size_left: %ld\n", 
+              s->reply_body_size_left);
         if(s->server_sock >= 0) {
             eventdel(g_efd, ev);
             close(ev->fd);

@@ -163,7 +163,7 @@ void accept_conn(int lfd, int read_events, int write_event, void *arg)
             break;
         }
 
-         tcp_stream* s = stream_create(cfd, (struct sockaddr*)&cin);
+         tcp_stream* s = stream_create(cfd, (struct sockaddr_in*)&cin);
          s->flags.server_closed = 0;
 
         struct myevent_s* ev = evget();
@@ -359,7 +359,7 @@ static void format_request(char* buf, int len, unsigned long lbe_ip, unsigned sh
     return;
 }
 
-static int create_socket(unsigned long lbe_ip, unsigned short lbe_port) {
+int create_socket(unsigned long lbe_ip, unsigned short lbe_port) {
     int r = 0;
     int sock = 0;
     struct sockaddr_in peeraddr;
@@ -507,17 +507,20 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
                 close_stream(ev, 1);
             }
         } else if(s->reply_body_size_left == 0) {
-            s->reply_body_size_left = 1024;
-            printf("data_transfer start\n");
+            if (buf_data_size(s->out_buf) < sizeof(uint64_t)) {
+                goto cont;
+            }
+            s->reply_body_size_left = *((uint64_t*)s->out_buf->buffer);
+            buf_pick(s->out_buf, sizeof(uint64_t));
+            printf("data_transfer start, sum_size: %ld\n", s->reply_body_size_left);
 
             if(s->reply_body_size_left > 0) {
                 s->reply_body_size_left -= buf_data_size(s->out_buf);
                 clear_space(s->out_buf);
-
-                if(s->reply_body_size_left == 0) {
-                    close_stream(ev, 1);
-                    return;
-                }
+            }
+            if(s->reply_body_size_left == 0) {
+                close_stream(ev, 1);
+                return;
             }
             /*
                if(s->flags.server_closed == 1) {
@@ -528,6 +531,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
                */
         }
     }
+cont:
     download_set_event_in_out(ev);
 }
 
@@ -549,9 +553,10 @@ static void download_set_event_in_out(myevent_s *ev) {
 }
 
 static void close_stream(myevent_s* ev, int reason) {
-    printf("siteinfo_download close_stream\n");
     if(ev != NULL) {
         tcp_stream* s = ev->stream;
+        printf("siteinfo_download close_stream, s->reply_body_size_left: %ld\n", 
+              s->reply_body_size_left);
         if(s->server_sock >= 0) {
             eventdel(g_efd, ev);
             close(ev->fd);
@@ -577,5 +582,5 @@ int main()
     while(1) {
         sleep(1);
     }
-    return 0;
 }
+
