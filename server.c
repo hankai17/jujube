@@ -25,6 +25,7 @@ int sys_start;
 #define cfg_http_buf_size (8*1024) 
 #define mid_http_buf_size (64*1024) 
 #define MAX_EVENTS  1024
+typedef void timeout_handler_t(int, void *);
 
 typedef struct tcp_stream {
 	time_t data_start;
@@ -72,6 +73,7 @@ typedef struct myevent_s {
     void (*call_back)(int fd, int read_event, int write_event, void *arg);
     int status; 	    //1 means polling; 0 means not polling
     long last_active;
+    timeout_handler_t *thandler;
     tcp_stream *stream;
 } myevent_s;
 
@@ -93,6 +95,17 @@ static void eventadd(int efd, int events, struct myevent_s *ev);
 static void eventdel(int efd, struct myevent_s *ev);
 
 static long next_run_time;
+
+static void timeout_callback(int fd, void *data)
+{
+    tcp_stream *s = (tcp_stream*)data;
+    if (1) {
+        printf("timeout callback\n");
+        // is stream left 0 ?
+    } else {
+        printf("close it\n");
+    }
+}
 
 const char * xstrerror(void)
 {
@@ -236,8 +249,9 @@ void* main_loop(void* arg) {
             long duration = now - g_events[checkpos].last_active;
             if (duration >= 10) {
                 printf("siteinfo_download fd: %d, timeout\n", g_events[checkpos].fd);
-                eventdel(g_efd, &g_events[checkpos]);
-                close_stream(&g_events[checkpos], 0);
+                //eventdel(g_efd, &g_events[checkpos]);
+                //close_stream(&g_events[checkpos], 0);
+                g_events[checkpos].thandler(1, g_events[checkpos].stream);
             }
         }
         int nfd = epoll_wait(g_efd, events, MAX_EVENTS + 1, 1000);
@@ -324,6 +338,12 @@ static void eventdel(int efd, struct myevent_s *ev) {
     }
 
     return;
+}
+
+static int event_set_timeout(struct myevent_s *ev, int timeout, timeout_handler_t handler)
+{
+    ev->thandler = handler;
+    return 0;
 }
 
 static tcp_stream* stream_create(int sock, struct sockaddr_in* paddr) {
@@ -549,6 +569,7 @@ static void download_set_event_in_out(myevent_s *ev) {
     //eventdel(g_efd, ev);
     //eventset(ev, ev->fd, ev->si, data_transfer, ev);
     eventadd(g_efd, rw_type, ev);
+    event_set_timeout(ev, 0, timeout_callback);
     return;
 }
 
