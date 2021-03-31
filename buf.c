@@ -48,7 +48,7 @@ int buf_realloc( buf_t * b, size_t len)
 	return 0;
 }
 
-int buf_put(buf_t *b, char * data, size_t len)
+int buf_put(buf_t *b, char *data, size_t len)
 {
 	if(buf_free_space(b) < len ) {
 		/* no recommended to do this, so give some warning here */
@@ -59,3 +59,4 @@ int buf_put(buf_t *b, char * data, size_t len)
 	b->data_len += len;
 	return 0;
 }
+

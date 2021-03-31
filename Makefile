@@ -1,18 +1,14 @@
 CC = gcc
-CFLAGS = -Wall -g -DDEBUG_MEM_CHECK
+#CFLAGS = -Wall -g -DDEBUG_MEM_CHECK
+#CFLAGS = -g -DDEBUG_MEM_CHECK
+CFLAGS = -g -DDEBUG_MEM_CHECK -DUSE_FASTLZ
 LIBS = -lpthread -pthread
 
-all: jujube_client jujube_server
-
-jujube_client:base.o buf.o mem.o
-	$(CC) $(CFLAGS) $(LIBS) $^ -o $@ 
-
-jujube_server:server.o buf.o mem.o
-	$(CC) $(CFLAGS) $(LIBS) $^ -o $@ 
+all: fastlz.o ip.o buf.o mem.o comm.o server.o client.o 
 
 %.o:%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 .PHONY:clean all
 clean:
-	-rm -rf *.o jujube_client jujube_server
+	-rm -rf *.o
