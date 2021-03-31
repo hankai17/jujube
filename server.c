@@ -43,7 +43,7 @@ static void accept_conn(int lfd, int read_events, int write_event, void *arg)
 
     } while(0);
 
-    #if 0 // TODO
+#if 0 // TODO
     if (jaddr.flag == USE_IPV4) {
         struct sockaddr_in *cin4 = (struct sockaddr_in *)&cin;
         printf("accept new connect [%s:%d][time:%ld], pos[%d]\n", 
@@ -53,7 +53,7 @@ static void accept_conn(int lfd, int read_events, int write_event, void *arg)
         printf("accept new connect [%s:%d][time:%ld], pos[%d]\n", 
                 "todo", ntohs(cin6->sin6_port), g_events[i].last_active, i);
     }
-    #endif
+#endif
 
     return;
 }
@@ -63,7 +63,7 @@ void main_rcv_loop(void *ip, int port) {
     if(g_efd <= 0) {
         return;
     }
-    
+
     memcpy(&jaddr, ip, sizeof(struct jujube_in_addr));
     init_listensocket(g_efd, port, g_events, &jaddr, accept_conn);
 
@@ -77,27 +77,27 @@ void main_rcv_loop(void *ip, int port) {
 
         // periodicity task
         if (now >= next_time) {
-            printf("--------------------------------------statics: %d/10s\n", g_qps);
+            //printf("--------------------------------------statics: %d/10s\n", g_qps);
             g_qps = 0;
             next_time = now + 10;
         }
-        expires_house_keeping(g_efd, &checkpos, g_events, now, -1); 
+        expires_house_keeping(g_efd, &checkpos, g_events, now, -1);
         int nfd = epoll_wait(g_efd, events, MAX_EVENTS + 1, 1000);
         if (nfd < 0 && errno != EINTR) {
             break;
         }
         for (i = 0; i < nfd; i++) {
             struct myevent_s *ev = (struct myevent_s *)events[i].data.ptr;
-            ev->call_back(ev->fd, events[i].events & EPOLLIN ? 1 : 0, 
-                    events[i].events & EPOLLOUT ? 1 : 0, ev->arg);
+            ev->call_back(ev->fd, events[i].events & EPOLLIN ? 1 : 0,
+                          events[i].events & EPOLLOUT ? 1 : 0, ev->arg);
         }
     }
     close(g_efd);
     return;
 }
 
-static int event_set_timeout(struct myevent_s *ev, int timeout, 
-        timeout_handler_t handler)
+static int event_set_timeout(struct myevent_s *ev, int timeout,
+                             timeout_handler_t handler)
 {
     ev->thandler = handler;
     return 0;
@@ -113,7 +113,7 @@ static int collect_data(tcp_stream *s, myevent_s *ev)
     if (s == NULL) return -1;
     s->data_recved += buf_data_size(s->out_buf);
     s->reply_body_size_left -= buf_data_size(s->out_buf);
-    buf_put(s->work_buf, s->out_buf->buffer, buf_data_size(s->out_buf)); 
+    buf_put(s->work_buf, s->out_buf->buffer, buf_data_size(s->out_buf));
     clear_space(s->out_buf);
     if (s->reply_body_size_left == 0) {
         if (s->data_recved != s->content_len) {
@@ -162,13 +162,6 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
 
     if(read_event) {
         assert(buf_data_size(s->out_buf) == 0);
-        // ONLY master recv log
-        /*
-        if (current_role != 2) {
-            close_stream(g_efd, ev, 0); 
-            return;
-        }
-        */
         if((stream_feed_out(s)) < 0) {
             if(buf_data_size(s->out_buf) == 0) {
                 close_stream(g_efd, ev, 3);
@@ -206,8 +199,8 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
                 goto cont;
             }
 
-            if (*((uint64_t*)s->out_buf->buffer) > LOG_MAX_LEN || 
-                    *((uint64_t*)s->out_buf->buffer) == 0) {
+            if (*((uint64_t*)s->out_buf->buffer) > LOG_MAX_LEN ||
+                *((uint64_t*)s->out_buf->buffer) == 0) {
                 clear_space(s->out_buf);
                 close_stream(g_efd, ev, 1);
                 return;
@@ -231,7 +224,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
             }
         }
     }
-cont:
+    cont:
     set_event_in_out(g_efd, ev);
     //event_set_timeout(ev, 0, timeout_callback);
 }

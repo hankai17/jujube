@@ -15,7 +15,7 @@ typedef enum {
 	MEM_64B_BUF,
 	MEM_128B_BUF,
 	MEM_256B_BUF,
-	MEM_512B_BUF,	
+	MEM_512B_BUF,
 	MEM_1K_BUF,
 	MEM_2K_BUF,
 	MEM_4K_BUF,
@@ -73,14 +73,14 @@ void  mem_module_init()
 		mem_stat[i].blocks_used = 0;
 	}
 
-	#ifdef DEBUG_MEM_CHECK
+#ifdef DEBUG_MEM_CHECK
 	INIT_LIST_HEAD(&MEM_USED_LIST);
-	#endif	
+#endif
 
 	pthread_mutexattr_init(&mutexattr);
-	pthread_mutexattr_settype(&mutexattr,PTHREAD_MUTEX_DEFAULT);	
+	pthread_mutexattr_settype(&mutexattr,PTHREAD_MUTEX_DEFAULT);
 	pthread_mutex_init(&mem_mutex,&mutexattr);
-	pthread_mutexattr_destroy(&mutexattr);	
+	pthread_mutexattr_destroy(&mutexattr);
 
 }
 
@@ -90,15 +90,15 @@ void *  mem_alloc(const char *module, size_t size)
 	int i;
 	mem_entry_t  *me;
 
-	assert(size <= MAX_EXT_MEM_BLOCK );		
-	
+	assert(size <= MAX_EXT_MEM_BLOCK );
+
 	for(i = 0; i < MEM_TYPE_MAX; i++){
 		if( size <= 1 << (i+4) )
 			break;
 	}
 	assert(i < MEM_TYPE_MAX);
 
-	pthread_mutex_lock(&mem_mutex);	
+	pthread_mutex_lock(&mem_mutex);
 
 	if( list_empty(&MemPools[i]) ){
 		/*me = (mem_entry_t *)malloc(sizeof(mem_entry_t) + size - 1);*/
@@ -106,8 +106,8 @@ void *  mem_alloc(const char *module, size_t size)
 		me->obj_size = size;
 		me->refcount = 1;
 		*(char*)((void*)me+((1 << (i+4)) + offsetof(mem_entry_t, obj))) = 0xf;
-		
-		#ifdef DEBUG_MEM_CHECK
+
+#ifdef DEBUG_MEM_CHECK
 		if(module)
 			me->module = module;
 		else
@@ -115,7 +115,7 @@ void *  mem_alloc(const char *module, size_t size)
 		list_add( &me->dlist, &MEM_USED_LIST );
 		/*mem_alloc_time++*/
 		/*this value should be equal to the num of entries in usedlist.*/
-		#endif
+#endif
 
 		mem_stat[i].blocks_used++;
 
@@ -126,18 +126,18 @@ void *  mem_alloc(const char *module, size_t size)
 
 	me = container_of_dlist(MemPools[i].next, mem_entry_t);
 	list_del(MemPools[i].next);
-	
-	#ifdef DEBUG_MEM_CHECK
+
+#ifdef DEBUG_MEM_CHECK
 	if(module)
 		me->module = module;
 	else
 		me->module = 0;
 	list_add( &me->dlist, &MEM_USED_LIST );
-	#endif
+#endif
 
 	mem_stat[i].blocks_used++;
 	mem_stat[i].blocks_free--;
-	
+
 	me->refcount++;
 	assert(me->refcount== 1);
 	memset((void *)me->obj, 0x0, (1 << (i+4)));
@@ -148,7 +148,7 @@ void *  mem_alloc(const char *module, size_t size)
 
 void  mem_free(void *buf)
 {
-	int i; 
+	int i;
 	mem_entry_t * me = (mem_entry_t *)((char *)buf - offsetof(mem_entry_t, obj));
 /*
 	debug(20, 0)("mem_free: module(%s), size(%d)\n", me->module, me->obj_size);
@@ -165,12 +165,12 @@ void  mem_free(void *buf)
 	me->refcount--;
 	assert(me->refcount == 0);
 
-	pthread_mutex_lock(&mem_mutex);	
-	
-	#ifdef DEBUG_MEM_CHECK
+	pthread_mutex_lock(&mem_mutex);
+
+#ifdef DEBUG_MEM_CHECK
 	list_del(&me->dlist);
-	#endif
-	
+#endif
+
 	list_add_tail(&me->dlist,&MemPools[i]);
 	mem_stat[i].blocks_used--;
 	mem_stat[i].blocks_free++;
@@ -192,33 +192,33 @@ int statistics_mem_info(char buff[], size_t buff_sz)
 			total_mem_sz += cur_mem_block_sz;
 			/*block size:total size:used:free*/
 			fmt_sz =snprintf(buff+cur_sz, buff_sz -cur_sz , "%d: %lu,%d,%d\n", (1<<(i+4)), cur_mem_block_sz,
-						mem_stat[i].blocks_used, mem_stat[i].blocks_free);
+							 mem_stat[i].blocks_used, mem_stat[i].blocks_free);
 			cur_sz += fmt_sz;
 		}
 
 		if(cur_sz > buff_sz - 3)
 			break;
 	}
-	
+
 	if(cur_sz < buff_sz)
 	{
 		fmt_sz = snprintf(buff+cur_sz, buff_sz -cur_sz, "Total size:%lu ", total_mem_sz);
 		cur_sz += fmt_sz;
 	}
 
-	return cur_sz;	
+	return cur_sz;
 }
 
 void *  mem_realloc(void *buf, size_t old_size ,size_t new_size)
 {
 	mem_entry_t * me = (mem_entry_t *)((char *)buf - offsetof(mem_entry_t, obj));
-	
+
 	void* new_buf = mem_alloc(me->module, new_size);
 	if(old_size<=me->obj_size && old_size<=new_size)
 	{
 		memcpy(new_buf,buf,old_size);
 	}
-	mem_free(buf);	
+	mem_free(buf);
 	return new_buf;
 }
 

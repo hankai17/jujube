@@ -17,7 +17,7 @@ static int set_wake_up_polling()
     if (pipe(tickle_fd)) {
         return -1;
     }
-    struct epoll_event ev; 
+    struct epoll_event ev;
     memset(&ev, 0x0, sizeof(struct epoll_event));
     ev.events = EPOLLIN;
     ev.data.fd = tickle_fd[0];
@@ -82,16 +82,16 @@ static int create_socket(struct transfer_log_entry* log_entry) {
     char msg_info[32 * 1024] = {0};
     char prefix_len[8] = {0};
 
-    #if USE_FASTLZ
+#if USE_FASTLZ
     char fast_compress_buff[34407] = {0};
     //uint64_t compress_ret = fastlz_compress(log_entry->gather_logmsg, log_entry->msg_len, fast_compress_buff);
     uint64_t compress_ret = fastlz_compress_level(2, log_entry->gather_logmsg, log_entry->msg_len, fast_compress_buff);
     //if (compress_ret < 0) { } // TODO
     memcpy(prefix_len, &compress_ret, sizeof(uint64_t));
-    #else
+#else
     memcpy(prefix_len, &log_entry->msg_len, sizeof(log_entry->msg_len));
     memcpy(msg_info, log_entry->gather_logmsg, log_entry->msg_len);
-    #endif
+#endif
 
     struct sockaddr_storage peeraddr;
     jujube_in_addr jaddr;
@@ -103,14 +103,14 @@ static int create_socket(struct transfer_log_entry* log_entry) {
         peer_ipv4_addr->sin_family = AF_INET;
         peer_ipv4_addr->sin_port = (log_entry->port);
         memcpy(&peer_ipv4_addr->sin_addr, &jaddr.inx_addr.ipv4_addr,
-                sizeof(struct sockaddr_in));
+               sizeof(struct sockaddr_in));
         sock = socket(AF_INET, SOCK_STREAM, 0);
     } else {
         struct sockaddr_in6 *peer_ipv6_addr = (struct sockaddr_in6 *)&peeraddr;
         peer_ipv6_addr->sin6_family = AF_INET6;
         peer_ipv6_addr->sin6_port = (log_entry->port);
         memcpy(&peer_ipv6_addr->sin6_addr, &jaddr.inx_addr.ipv6_addr,
-                sizeof(struct sockaddr_in6));
+               sizeof(struct sockaddr_in6));
         sock = socket(AF_INET6, SOCK_STREAM, 0);
     }
 
@@ -130,11 +130,11 @@ static int create_socket(struct transfer_log_entry* log_entry) {
     eventadd(g_efd, EPOLLOUT, ev);
 
     buf_put(s->in_buf, prefix_len, 8);
-    #if USE_FASTLZ
+#if USE_FASTLZ
     buf_put(s->in_buf, fast_compress_buff, compress_ret);
-    #else
+#else
     buf_put(s->in_buf, msg_info, log_entry->msg_len);
-    #endif
+#endif
 
     if(comm_set_nonblock(sock) < 0) {
         close_stream(g_efd, ev, 2);
@@ -145,7 +145,7 @@ static int create_socket(struct transfer_log_entry* log_entry) {
         close_stream(g_efd, ev,  3);
         goto end;
     }
-end:
+    end:
     if (log_entry) {
         free(log_entry);
     }
@@ -180,7 +180,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
             close_stream(g_efd, ev, 3); // minion do not recv data
         }
     }
-    
+
     set_event_in_out(g_efd, ev);
 }
 

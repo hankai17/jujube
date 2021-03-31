@@ -1,7 +1,7 @@
 #ifndef _LIST_H
 #define _LIST_H
 
-typedef struct list_head 
+typedef struct list_head
 {
 	struct list_head *next;
 	struct list_head *prev;
@@ -21,8 +21,8 @@ static inline void INIT_LIST_HEAD(struct list_head *list)
  * the prev/next entries already!
  */
 static inline void __list_add(struct list_head *pnew,
-			      struct list_head *prev,
-			      struct list_head *next)
+							  struct list_head *prev,
+							  struct list_head *next)
 {
 	next->prev = pnew;
 	pnew->next = next;
@@ -71,7 +71,7 @@ static inline void list_del(struct list_head *entry)
  * @head: the head of the list
  */
 static inline int list_is_last(const struct list_head *list,
-				const struct list_head *head)
+							   const struct list_head *head)
 {
 	return list->next == head;
 }

@@ -2,38 +2,38 @@
 
 const char *xstrerror(void)
 {
-	static char xstrerror_buf[1024 * 4];
-	const char *errmsg;
+    static char xstrerror_buf[1024 * 4];
+    const char *errmsg;
 
-	errmsg = strerror(errno);
-	if (!errmsg || !*errmsg)
-		errmsg = "Unknown error";
+    errmsg = strerror(errno);
+    if (!errmsg || !*errmsg)
+        errmsg = "Unknown error";
 
-	snprintf(xstrerror_buf, 1024 * 4, "(%d) %s", errno, errmsg);
-	return xstrerror_buf;
+    snprintf(xstrerror_buf, 1024 * 4, "(%d) %s", errno, errmsg);
+    return xstrerror_buf;
 }
 
 int connect_nonb(int  sk,struct sockaddr* psa)
 {
-	int r;
-	r = connect(sk,psa,sizeof(struct sockaddr));
-	if(r < 0 && errno == EINPROGRESS) r = -2;
-	return r;
+    int r;
+    r = connect(sk,psa,sizeof(struct sockaddr));
+    if(r < 0 && errno == EINPROGRESS) r = -2;
+    return r;
 }
 
 int comm_set_nonblock(int fd)
 {
-	int flags;
-	if ((flags = fcntl(fd, F_GETFL, 0)) < 0) {	
-		return -1;
-	}
-	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-		return -1;
-	}
-	return 0;
+    int flags;
+    if ((flags = fcntl(fd, F_GETFL, 0)) < 0) {
+        return -1;
+    }
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        return -1;
+    }
+    return 0;
 }
 
-tcp_stream* stream_create(int sock, struct sockaddr_storage* paddr) 
+tcp_stream* stream_create(int sock, struct sockaddr_storage* paddr)
 {
     tcp_stream* s;
     s = mem_alloc("stream", sizeof(tcp_stream));
@@ -43,8 +43,8 @@ tcp_stream* stream_create(int sock, struct sockaddr_storage* paddr)
     s->data_out = 0;
 
     struct timeval now;
-    gettimeofday(&now, NULL); 
-    s->data_begin = ((long)now.tv_sec) * 1000 + (long)now.tv_usec / 1000; 
+    gettimeofday(&now, NULL);
+    s->data_begin = ((long)now.tv_sec) * 1000 + (long)now.tv_usec / 1000;
 
     s->server_sock = sock;
     //memcpy(&s->client_addr, paddr, sizeof(struct sockaddr_in));
@@ -55,7 +55,7 @@ tcp_stream* stream_create(int sock, struct sockaddr_storage* paddr)
     s->in_buf->buf_len = cfg_http_buf_size;
     s->in_buf->data_len = 0;
 
-    s->out_buf = mem_alloc("http_stream_out_buf",sizeof(buf_t));	
+    s->out_buf = mem_alloc("http_stream_out_buf",sizeof(buf_t));
     s->out_buf->buffer = mem_alloc("http_stream_out_buf_data_4", mid_http_buf_size);
     s->out_buf->buf_len = mid_http_buf_size;
     s->out_buf->data_len = 0;
@@ -63,7 +63,7 @@ tcp_stream* stream_create(int sock, struct sockaddr_storage* paddr)
     return s;
 }
 
-int stream_flush_out(tcp_stream *s, int size) 
+int stream_flush_out(tcp_stream *s, int size)
 {
     int r;
     int t = 0;
@@ -93,7 +93,7 @@ int stream_flush_out(tcp_stream *s, int size)
     return t;
 }
 
-int stream_feed_out(tcp_stream *s) 
+int stream_feed_out(tcp_stream *s)
 {
     int r;
     int t = 0;
@@ -121,7 +121,7 @@ int stream_feed_out(tcp_stream *s)
     return t;
 }
 
-myevent_s* evget(myevent_s *g_events) 
+myevent_s* evget(myevent_s *g_events)
 {
     int i = 0;
     myevent_s* ev = NULL;
@@ -138,8 +138,8 @@ myevent_s* evget(myevent_s *g_events)
     return ev;
 }
 
-void eventset(struct myevent_s *ev, int fd, tcp_stream* s, 
-        void (*call_back)(int, int, int, void *), void *arg) 
+void eventset(struct myevent_s *ev, int fd, tcp_stream* s,
+              void (*call_back)(int, int, int, void *), void *arg)
 {
     ev->fd = fd;
     ev->call_back = call_back;
@@ -151,7 +151,7 @@ void eventset(struct myevent_s *ev, int fd, tcp_stream* s,
     return;
 }
 
-void eventadd(int efd, int events, struct myevent_s *ev) 
+void eventadd(int efd, int events, struct myevent_s *ev)
 {
     struct epoll_event epv = {0, {0}};
     int op;
@@ -176,7 +176,7 @@ void eventadd(int efd, int events, struct myevent_s *ev)
     return;
 }
 
-void eventdel(int efd, struct myevent_s *ev) 
+void eventdel(int efd, struct myevent_s *ev)
 {
     struct epoll_event epv = {0, {0}};
     if (ev->status != 1)
@@ -193,7 +193,7 @@ void eventdel(int efd, struct myevent_s *ev)
     return;
 }
 
-void set_event_in_out(int g_efd, myevent_s *ev) 
+void set_event_in_out(int g_efd, myevent_s *ev)
 {
     tcp_stream* s = ev->stream;
     int rw_type = 0;
@@ -208,11 +208,11 @@ void set_event_in_out(int g_efd, myevent_s *ev)
     //eventdel(g_efd, ev);
     //eventset(ev, ev->fd, ev->si, data_transfer, ev);
     eventadd(g_efd, rw_type, ev);
-    
+
     return;
 }
 
-void close_stream(int g_efd, myevent_s* ev, int reason) 
+void close_stream(int g_efd, myevent_s* ev, int reason)
 {
     if(ev != NULL) {
         tcp_stream* s = ev->stream;
@@ -238,8 +238,8 @@ void close_stream(int g_efd, myevent_s* ev, int reason)
     return;
 }
 
-void init_listensocket(int efd, short port, myevent_s *g_events, 
-        jujube_in_addr *jaddr, void (*accept_cb)(int, int, int, void *))
+void init_listensocket(int efd, short port, myevent_s *g_events,
+                       jujube_in_addr *jaddr, void (*accept_cb)(int, int, int, void *))
 {
     struct sockaddr_storage peeraddr;
     int lfd = socket(jaddr->flag == USE_IPV6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0);
@@ -247,29 +247,29 @@ void init_listensocket(int efd, short port, myevent_s *g_events,
 
     eventset(&g_events[MAX_EVENTS], lfd, NULL, accept_cb, &g_events[MAX_EVENTS]);
     eventadd(efd, EPOLLIN, &g_events[MAX_EVENTS]);
-    
+
     if (jaddr->flag == USE_IPV6) {
         struct sockaddr_in6 *peer_ipv6_addr = (struct sockaddr_in6 *)&peeraddr;
         peer_ipv6_addr->sin6_family = AF_INET6;
         peer_ipv6_addr->sin6_port = htons(port);
         memcpy(&peer_ipv6_addr->sin6_addr, &jaddr->inx_addr.ipv6_addr,
-                sizeof(struct sockaddr_in6));
+               sizeof(struct sockaddr_in6));
     } else {
         struct sockaddr_in *peer_ipv4_addr = (struct sockaddr_in *)&peeraddr;
         peer_ipv4_addr->sin_family = AF_INET;
         peer_ipv4_addr->sin_port = htons(port);
         memcpy(&peer_ipv4_addr->sin_addr, &jaddr->inx_addr.ipv4_addr,
-                sizeof(struct sockaddr_in));
+               sizeof(struct sockaddr_in));
     }
 
-    bind(lfd, (struct sockaddr *)&peeraddr, jaddr->flag == USE_IPV6 ? 
-            sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in));
+    bind(lfd, (struct sockaddr *)&peeraddr, jaddr->flag == USE_IPV6 ?
+                                            sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in));
     listen(lfd, 128);
     return;
 }
 
-void expires_house_keeping(int g_efd, int *pos, myevent_s *g_events, 
-        long now, int except_fd) 
+void expires_house_keeping(int g_efd, int *pos, myevent_s *g_events,
+                           long now, int except_fd)
 {
     int checkpos = *pos;
     int i = 0;

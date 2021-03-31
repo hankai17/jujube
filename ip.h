@@ -11,7 +11,7 @@
 typedef struct jujube_in_addr {
 	union {
 		struct in_addr ipv4_addr;
-		struct in6_addr ipv6_addr;	
+		struct in6_addr ipv6_addr;
 	} inx_addr;
 	unsigned int flag;
 } jujube_in_addr;

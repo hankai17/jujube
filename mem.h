@@ -12,9 +12,9 @@ typedef struct  {
 	struct list_head dlist;
 	size_t obj_size;
 	int refcount;
-	#ifdef DEBUG_MEM_CHECK
+#ifdef DEBUG_MEM_CHECK
 	const char *module;
-	#endif
+#endif
 	char obj[1];
 } mem_entry_t;
 

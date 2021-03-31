@@ -7,7 +7,7 @@
 
 void jujube_in_addr_init(struct jujube_in_addr *jaddr) {
 	memset(&(jaddr->inx_addr), 0, sizeof(jaddr->inx_addr));
-    jaddr->flag = NONE_IP;
+	jaddr->flag = NONE_IP;
 	return;
 }
 
@@ -24,7 +24,7 @@ int jujube_pton(int family, const char *ip, struct jujube_in_addr *jaddr) {
 		goto end;
 	}
 	memcpy(&jaddr->inx_addr, &in6_val, sizeof(jaddr->inx_addr));
-end:
+	end:
 	return ret;
 }
 
@@ -57,7 +57,7 @@ static int check_blank(char *instr) {
 	if (num == 0)
 		return 0;
 	else if (num == 1) {
-	//	sscanf(p, "%s", instr);
+		//	sscanf(p, "%s", instr);
 		return 1;
 	} else
 		return -1;
@@ -157,9 +157,9 @@ int check_host_ipv4(char *ip) {
 		p = (uint8_t *)&tempip;
 		if (p[0] == 0 || (p[0] > 223)||(p[3]==255) || (p[0]==127 )) {
 			return -1;
-        } else {
+		} else {
 			return 1;
-        }
+		}
 	} else if (result == -1) {
 		return -1;
 	}
@@ -175,19 +175,19 @@ int check_host_ipv6(struct jujube_in_addr *jaddr) {
 		ret = -2;
 		goto end;
 	}
-end:
+	end:
 	return ret;
 }
 
 int check_host_ip(char* server_ip, struct jujube_in_addr *jaddr) {
 	int ret = 0;
-    int flag = jaddr->flag;
+	int flag = jaddr->flag;
 	if (flag & USE_IPV4) {
 		if ((ret = check_host_ipv4(server_ip)) != 1) {
 			ret = -1;
 			goto end;
 		} else {
-			ret = 0;	
+			ret = 0;
 			goto end;
 		}
 	} else if (flag & USE_IPV6) {
@@ -195,7 +195,7 @@ int check_host_ip(char* server_ip, struct jujube_in_addr *jaddr) {
 			goto end;
 		}
 	}
-end:
+	end:
 	return ret;
 }
 
@@ -205,32 +205,32 @@ int check_host_ip_and_get_verion(char *server_ip, struct jujube_in_addr *jaddr) 
 	jujube_in_addr_init(&tmp_addr);
 
 	if ((ret = jujube_pton(AF_INET, server_ip, &tmp_addr)) == 1) {
-        tmp_addr.flag = USE_IPV4;
+		tmp_addr.flag = USE_IPV4;
 	} else if(ret == 0) {
 		if ((ret = jujube_pton(AF_INET6, server_ip, &tmp_addr)) != 1) {
 			ret = -1;
 			goto end;
 		}
-        tmp_addr.flag = USE_IPV6;
+		tmp_addr.flag = USE_IPV6;
 	} else {
 		ret = -2;
 		goto end;
 	}
 	memcpy(jaddr, &tmp_addr, sizeof(tmp_addr));
 	ret = check_host_ip(server_ip, jaddr);
-end:
+	end:
 	return ret;
 }
 
 const char *ip_2_str(struct jujube_in_addr *in_addr) {
 	static char str[INET6_ADDRSTRLEN] = {'\0'};
 	struct in6_addr *in_addr_ptr= (struct in6_addr *)(&in_addr->inx_addr);
-	const char *p = inet_ntop(in_addr->flag == USE_IPV4 ? AF_INET : AF_INET6, 
-        (const void *)in_addr_ptr, str, sizeof(str));
+	const char *p = inet_ntop(in_addr->flag == USE_IPV4 ? AF_INET : AF_INET6,
+							  (const void *)in_addr_ptr, str, sizeof(str));
 
 	if (!p) {
 		str[0] = '\0';
-    }
+	}
 	return str;
 }
 

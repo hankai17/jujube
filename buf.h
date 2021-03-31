@@ -4,14 +4,14 @@
 #include <sys/types.h>
 #include "list.h"
 
-typedef struct buf_s {	
-	char *buffer; 
+typedef struct buf_s {
+	char *buffer;
 	size_t buf_len;
 	size_t data_len;
 } buf_t;
 
 typedef struct {
-	struct list_head dlist; 
+	struct list_head dlist;
 	buf_t * buf;
 } buf_chain_t;
 
