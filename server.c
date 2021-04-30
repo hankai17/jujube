@@ -42,6 +42,8 @@ static void accept_conn(int lfd, int read_events, int write_event, void *arg)
         eventadd(g_efd, EPOLLIN, ev);
 
     } while(0);
+    
+    // Check fd or stream vaild TODO
 
 #if 0 // TODO
     if (jaddr.flag == USE_IPV4) {

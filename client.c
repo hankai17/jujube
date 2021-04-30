@@ -7,34 +7,136 @@ static int g_efd;
 int tickle_fd[2] = {0};
 
 void main_loop();
-static int create_socket(struct transfer_log_entry* log_entry);
+static int create_transaction(struct transfer_log_entry* log_entry);
+static void connect_cb(int sock, int read_event, int write_event, void *data);
+static void keepalive_cb(int sock, int read_event, int write_event, void *data);
 static void data_transfer(int sock, int read_event, int write_event, void *data);
+
 extern struct transfer_log_entry* get_log_entry_from_list();
 
-static int set_wake_up_polling()
+static void attach_stream_to_connect(struct jconnect *jc, tcp_stream *s) 
 {
-    int ret = 0;
-    if (pipe(tickle_fd)) {
-        return -1;
+    jc->stream = s;
+    struct myevent_s* ev;
+
+    if (jc->status == BEGIN_CONN) { // a new connection
+        ev = evget(g_events, -1);
+        eventset(ev, jc, connect_cb, ev);
+    } else if (jc->status == CONN_ESTAB) { // a keep-alive connection
+        ev = evget(g_events, jc->fd);
+        eventset(ev, jc, data_transfer, ev);
     }
-    struct epoll_event ev;
-    memset(&ev, 0x0, sizeof(struct epoll_event));
-    ev.events = EPOLLIN;
-    ev.data.fd = tickle_fd[0];
-    if (fcntl(tickle_fd[0], F_SETFL, O_NONBLOCK)) {
-        return -1;
-    }
-    //if (fcntl(tickle_fd[1], F_SETFL, O_NONBLOCK)) { // TODO
-    if (epoll_ctl(g_efd, EPOLL_CTL_ADD, tickle_fd[0], &ev)) {
-        return -1;
-    }
-    return 0;
+    eventadd(g_efd, EPOLLOUT, ev);
+    // TODO
+    return;
 }
 
-void wake_up_poll()
+static void release_stream_from_connect(myevent_s* ev, int is_bad_conn) 
 {
-    int ret = write(tickle_fd[1], "M", 1);
-    // check ret TODO
+    printf("release_stream_from_connect\n");
+    struct jconnect *jc = ev->jc;
+    tcp_stream *s = jc->stream;
+
+    free_transaction_stream(s); 
+    jc->stream = NULL;
+
+    if (is_bad_conn) {
+        ev->jc->is_alive = 0;
+        ev->jc->status = CONN_CLOSE;
+        eventdel(g_efd, ev);
+    } else {
+        //eventset(ev, ev->jc, keepalive_cb, ev);
+        //eventadd(g_efd, EPOLLIN | EPOLLOUT, ev);  // Because write always trigger SO we do not care about it
+        event_reset_cb(ev, keepalive_cb, ev);
+        eventadd(g_efd, EPOLLIN, ev); 
+    }
+    release_connection(jc);
+}
+
+static void connect_cb(int sock, int read_event, 
+        int write_event, void *data)
+{
+    myevent_s *ev = (myevent_s*)data;
+    struct jconnect *jc = ev->jc;
+    tcp_stream *s = jc->stream;
+    assert(sock == s->server_sock);
+    int ret = 0;
+    //if (read_event == 1 || write_event == 0) {
+    if (write_event == 0) {
+        printf("connect failed\n");
+        release_stream_from_connect(ev,  BAD_CONNECT);
+        return;
+    }
+
+    // Do not judge firstly. We should write & get write's ret
+    //if(getsockopt(s->server_sock, SOL_SOCKET,SO_ERROR,&error,&n) < 0) {
+    //    http_close_stream(s, HCT_connect_peer_err_2);
+    //    return;
+    //}
+
+    if (write_event) {
+        printf("connect ok?\n");
+        eventset(ev, jc, data_transfer, ev);
+        eventadd(g_efd, EPOLLOUT, ev);
+    }
+}
+
+static void keepalive_cb(int sock, int read_event, 
+        int write_event, void *data) {
+    printf("keepalive cb, read_event: %d, write_event: %d\n",
+            read_event, write_event);
+
+    int error;
+    int n;
+    if(getsockopt(sock, SOL_SOCKET,SO_ERROR, &error,&n) < 0) {
+        //http_close_stream(s, HCT_connect_peer_err_2);
+        printf("keeplive read err\n");    
+    }
+    myevent_s *ev = (myevent_s*)data;
+    release_stream_from_connect(ev,  BAD_CONNECT);
+}
+
+static int create_transaction(struct transfer_log_entry* log_entry) 
+{
+    int r = 0;
+    int sock = 0;
+    char msg_info[32 * 1024] = {0};
+    char prefix_len[8] = {0};
+
+    char fast_compress_buff[34407] = {0};
+    uint64_t compress_ret = fastlz_compress_level(2, log_entry->gather_logmsg, log_entry->msg_len, fast_compress_buff);
+    memcpy(prefix_len, &compress_ret, sizeof(uint64_t));
+
+    struct sockaddr_storage peeraddr;
+    jujube_in_addr jaddr;
+    memset(&peeraddr, 0x0, sizeof(struct sockaddr_storage));
+    memcpy(&jaddr, &log_entry->ip, sizeof(struct jujube_in_addr));
+
+    struct jconnect* jc = get_connection();
+    if (jc == NULL) {
+        int size = sizeof(struct jconnect);
+        jc = (jconnect*)malloc(size);
+        if (jc == NULL) {
+            goto end;
+        }
+        sock = create_connect_socket(&peeraddr, jaddr, log_entry->ip.flag, log_entry->port);
+        if (sock < 0) {
+            goto end;
+        }
+        jc->fd = sock;
+        jc->is_alive = 0;
+        jc->status = BEGIN_CONN;
+    } else {
+        printf("hit!!!!!!!!!!!!!!!!!!!!!!\n");
+    }
+    tcp_stream *s = new_transaction_stream(&peeraddr, jc->fd, prefix_len, fast_compress_buff, compress_ret);
+    attach_stream_to_connect(jc, s);
+
+end:
+    if (log_entry) {
+        free(log_entry);
+    }
+    return 0;
 }
 
 void main_loop() {
@@ -46,15 +148,33 @@ void main_loop() {
     struct epoll_event events[MAX_EVENTS + 1];
     int checkpos = 0, i;
     signal(SIGPIPE, SIG_IGN);
-    if (set_wake_up_polling()) {
+    if (set_wake_up_polling(g_efd, tickle_fd)) {
         return;
     }
+    int next_time = 0;
 
     while(1) {
         long now = time(NULL);
-        struct transfer_log_entry* log_entry = get_log_entry_from_list();
+        /*
+        struct transfer_log_entry* log_entry = NULL; //get_log_entry_from_list();
         if (log_entry) {
-            create_socket(log_entry); // ret TODO
+            create_transaction(log_entry); // ret TODO
+        }
+        */
+
+        if (now >= next_time) {
+            struct transfer_log_entry* log_entry = 
+                    (struct transfer_log_entry*)malloc(sizeof(struct transfer_log_entry));
+            char msg[64] = "1234567890";   
+            char ip_buf[64] = "192.168.104.159";
+            check_host_ip_and_get_verion(ip_buf, &log_entry->ip);
+            log_entry->proto = 1;
+            log_entry->port = htons(9527);
+            log_entry->msg_len = 64 * 1024;
+            memcpy(log_entry->gather_logmsg, msg, strlen(msg)); 
+            
+            create_transaction(log_entry);
+            next_time = now + 5;
         }
 
         expires_house_keeping(g_efd, &checkpos, g_events, now, tickle_fd[0]);
@@ -69,118 +189,54 @@ void main_loop() {
                 continue;
             }
             struct myevent_s *ev = (struct myevent_s *)events[i].data.ptr;
-            ev->call_back(ev->fd, events[i].events & EPOLLIN ? 1 : 0, events[i].events & EPOLLOUT ? 1 : 0, ev->arg);
+            ev->call_back(ev->fd, events[i].events & EPOLLIN ? 1 : 0, 
+                    events[i].events & EPOLLOUT ? 1 : 0, ev->arg);
         }
     }
     close(g_efd);
     return;
 }
 
-static int create_socket(struct transfer_log_entry* log_entry) {
-    int r = 0;
-    int sock = 0;
-    char msg_info[32 * 1024] = {0};
-    char prefix_len[8] = {0};
-
-#if USE_FASTLZ
-    char fast_compress_buff[34407] = {0};
-    //uint64_t compress_ret = fastlz_compress(log_entry->gather_logmsg, log_entry->msg_len, fast_compress_buff);
-    uint64_t compress_ret = fastlz_compress_level(2, log_entry->gather_logmsg, log_entry->msg_len, fast_compress_buff);
-    //if (compress_ret < 0) { } // TODO
-    memcpy(prefix_len, &compress_ret, sizeof(uint64_t));
-#else
-    memcpy(prefix_len, &log_entry->msg_len, sizeof(log_entry->msg_len));
-    memcpy(msg_info, log_entry->gather_logmsg, log_entry->msg_len);
-#endif
-
-    struct sockaddr_storage peeraddr;
-    jujube_in_addr jaddr;
-    memset(&peeraddr, 0x0, sizeof(struct sockaddr_storage));
-    memcpy(&jaddr, &log_entry->ip, sizeof(struct jujube_in_addr));
-
-    if (log_entry->ip.flag == USE_IPV4) {
-        struct sockaddr_in *peer_ipv4_addr = (struct sockaddr_in *)&peeraddr;
-        peer_ipv4_addr->sin_family = AF_INET;
-        peer_ipv4_addr->sin_port = (log_entry->port);
-        memcpy(&peer_ipv4_addr->sin_addr, &jaddr.inx_addr.ipv4_addr,
-               sizeof(struct sockaddr_in));
-        sock = socket(AF_INET, SOCK_STREAM, 0);
-    } else {
-        struct sockaddr_in6 *peer_ipv6_addr = (struct sockaddr_in6 *)&peeraddr;
-        peer_ipv6_addr->sin6_family = AF_INET6;
-        peer_ipv6_addr->sin6_port = (log_entry->port);
-        memcpy(&peer_ipv6_addr->sin6_addr, &jaddr.inx_addr.ipv6_addr,
-               sizeof(struct sockaddr_in6));
-        sock = socket(AF_INET6, SOCK_STREAM, 0);
-    }
-
-    if(sock < 0) {
-        goto end;
-    }
-    struct linger l;
-    l.l_onoff = 1;
-    l.l_linger = 0;
-    setsockopt(sock, SOL_SOCKET, SO_LINGER, (char *)&l, sizeof(l));
-
-    tcp_stream* s = stream_create(sock, &peeraddr);
-    s->flags.server_closed = 0;
-
-    struct myevent_s* ev = evget(g_events);
-    eventset(ev, sock, s, data_transfer, ev);
-    eventadd(g_efd, EPOLLOUT, ev);
-
-    buf_put(s->in_buf, prefix_len, 8);
-#if USE_FASTLZ
-    buf_put(s->in_buf, fast_compress_buff, compress_ret);
-#else
-    buf_put(s->in_buf, msg_info, log_entry->msg_len);
-#endif
-
-    if(comm_set_nonblock(sock) < 0) {
-        close_stream(g_efd, ev, 2);
-        goto end;
-    }
-    r = connect_nonb(sock, (struct sockaddr *)&peeraddr);
-    if(r == -1) {
-        close_stream(g_efd, ev,  3);
-        goto end;
-    }
-    end:
-    if (log_entry) {
-        free(log_entry);
-    }
-    return 0;
-}
-
 static void data_transfer(int sock, int read_event, int write_event, void *data) {
     myevent_s *ev = (myevent_s*)data;
-    tcp_stream *s = ev->stream;
+    tcp_stream *s = ev->jc->stream;
     assert(sock == s->server_sock);
     if (read_event == 0 && write_event == 0) {
-        close_stream(g_efd, ev, 2);
+        release_stream_from_connect(ev,  BAD_CONNECT);
         return;
     }
     int ret = 0;
 
     if (write_event) {
         if((ret = stream_flush_out(s, -1)) < 0) {
-            close_stream(g_efd, ev, 4);
+            release_stream_from_connect(ev,  BAD_CONNECT);
             return;
         }
+
+        ev->jc->is_alive = 1;
+        ev->jc->status = CONN_ESTAB;
+
         if (buf_data_size(s->in_buf) == 0) {
-            close_stream(g_efd, ev, 0);
+            printf("send data done\n");
+            release_stream_from_connect(ev,  OK_CONNECT);
             return;
         }
     }
 
     if (read_event) {
         if((stream_feed_out(s)) < 0) {
-            close_stream(g_efd, ev, 3);
+            release_stream_from_connect(ev,  BAD_CONNECT);
         } else {
-            close_stream(g_efd, ev, 3); // minion do not recv data
+            release_stream_from_connect(ev,  BAD_CONNECT);
         }
     }
 
-    set_event_in_out(g_efd, ev);
+    set_stream_event_in_out(g_efd, ev);
 }
 
+int main()
+{
+    init_connect_pool();
+    main_loop();
+    return 0;
+}
