@@ -3,8 +3,8 @@
 - simple event callback and timeout
 - simple transport protocol: <msg_len> [msg]
 - support fastlz
+- support keepalive
 
 ## TODO
 - sync queue
-- keepalive connection
 
