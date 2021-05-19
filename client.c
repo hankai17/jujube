@@ -16,6 +16,7 @@ extern struct transfer_log_entry* get_log_entry_from_list();
 
 static void attach_stream_to_connect(struct jconnect *jc, tcp_stream *s) 
 {
+    printf("attach_stream_to_connect\n");
     jc->stream = s;
     struct myevent_s* ev;
 
@@ -24,6 +25,8 @@ static void attach_stream_to_connect(struct jconnect *jc, tcp_stream *s)
         eventset(ev, jc, connect_cb, ev);
     } else if (jc->status == CONN_ESTAB) { // a keep-alive connection
         ev = evget(g_events, jc->fd);
+        //printf("ev.status: %d\n", ev->status);
+        eventdel(g_efd, ev); // Make sure that EPOLLOUT is add success
         eventset(ev, jc, data_transfer, ev);
     }
     eventadd(g_efd, EPOLLOUT, ev);
@@ -33,7 +36,7 @@ static void attach_stream_to_connect(struct jconnect *jc, tcp_stream *s)
 
 static void release_stream_from_connect(myevent_s* ev, int is_bad_conn) 
 {
-    printf("release_stream_from_connect\n");
+    printf("release_stream_from_connect, is_bad: %d\n", is_bad_conn);
     struct jconnect *jc = ev->jc;
     tcp_stream *s = jc->stream;
 
@@ -70,12 +73,10 @@ static void connect_cb(int sock, int read_event,
 
     // Do not judge firstly. We should write & get write's ret
     //if(getsockopt(s->server_sock, SOL_SOCKET,SO_ERROR,&error,&n) < 0) {
-    //    http_close_stream(s, HCT_connect_peer_err_2);
     //    return;
     //}
 
     if (write_event) {
-        printf("connect ok?\n");
         eventset(ev, jc, data_transfer, ev);
         eventadd(g_efd, EPOLLOUT, ev);
     }
@@ -88,22 +89,26 @@ static void keepalive_cb(int sock, int read_event,
 
     int error;
     int n;
+    myevent_s *ev = (myevent_s*)data;
+    struct jconnect *jc = ev->jc;
+    tcp_stream *s = jc->stream;
+
     if(getsockopt(sock, SOL_SOCKET,SO_ERROR, &error,&n) < 0) {
-        //http_close_stream(s, HCT_connect_peer_err_2);
         printf("keeplive read err\n");    
     }
-    myevent_s *ev = (myevent_s*)data;
-    release_stream_from_connect(ev,  BAD_CONNECT);
+
+    jc->is_alive = 0;
+    eventdel(g_efd, ev);
+    release_keepalive_connection(jc);
 }
 
 static int create_transaction(struct transfer_log_entry* log_entry) 
 {
     int r = 0;
     int sock = 0;
-    char msg_info[32 * 1024] = {0};
     char prefix_len[8] = {0};
 
-    char fast_compress_buff[34407] = {0};
+    char fast_compress_buff[32] = {0};
     uint64_t compress_ret = fastlz_compress_level(2, log_entry->gather_logmsg, log_entry->msg_len, fast_compress_buff);
     memcpy(prefix_len, &compress_ret, sizeof(uint64_t));
 
@@ -114,6 +119,7 @@ static int create_transaction(struct transfer_log_entry* log_entry)
 
     struct jconnect* jc = get_connection();
     if (jc == NULL) {
+        printf("not hit, will create a new conn\n");
         int size = sizeof(struct jconnect);
         jc = (jconnect*)malloc(size);
         if (jc == NULL) {
@@ -170,11 +176,11 @@ void main_loop() {
             check_host_ip_and_get_verion(ip_buf, &log_entry->ip);
             log_entry->proto = 1;
             log_entry->port = htons(9527);
-            log_entry->msg_len = 64 * 1024;
+            log_entry->msg_len = strlen(msg);
             memcpy(log_entry->gather_logmsg, msg, strlen(msg)); 
             
             create_transaction(log_entry);
-            next_time = now + 5;
+            next_time = now + 1;
         }
 
         expires_house_keeping(g_efd, &checkpos, g_events, now, tickle_fd[0]);
@@ -198,6 +204,8 @@ void main_loop() {
 }
 
 static void data_transfer(int sock, int read_event, int write_event, void *data) {
+    //printf("socket: %d, data_transfer read_event: %d, write_event: %d\n", 
+    //        sock, read_event, write_event);
     myevent_s *ev = (myevent_s*)data;
     tcp_stream *s = ev->jc->stream;
     assert(sock == s->server_sock);
@@ -208,6 +216,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
     int ret = 0;
 
     if (write_event) {
+        printf("connected ok\n");
         if((ret = stream_flush_out(s, -1)) < 0) {
             release_stream_from_connect(ev,  BAD_CONNECT);
             return;
@@ -229,6 +238,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
         } else {
             release_stream_from_connect(ev,  BAD_CONNECT);
         }
+        return;
     }
 
     set_stream_event_in_out(g_efd, ev);

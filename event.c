@@ -105,24 +105,29 @@ void close_stream(int g_efd, myevent_s* ev, int reason)
     if(ev != NULL) {
         if (ev->jc) {
             tcp_stream* s = ev->jc->stream;
-            //printf("server close_stream, s->reply_body_size_left: %ld\n", 
-            //      s->reply_body_size_left);
-            if(s->server_sock >= 0) {
-                eventdel(g_efd, ev);
-                close(ev->fd);
-                s->server_sock = -1;
-            }
+            if (s != NULL) { // activate timeout
+                //printf("server close_stream, s->reply_body_size_left: %ld\n", 
+                //      s->reply_body_size_left);
+                if(s->server_sock >= 0) {
+                    eventdel(g_efd, ev);
+                    close(ev->fd);
+                    s->server_sock = -1;
+                }
 
-            //memset(&s->flags, 0, sizeof(int));
-            mem_free(s->in_buf->buffer);
-            mem_free(s->in_buf);
-            mem_free(s->out_buf->buffer);
-            mem_free(s->out_buf);
-            if (s->work_buf) {
-                mem_free(s->work_buf->buffer);
-                mem_free(s->work_buf);
+                //memset(&s->flags, 0, sizeof(int));
+                mem_free(s->in_buf->buffer);
+                mem_free(s->in_buf);
+                mem_free(s->out_buf->buffer);
+                mem_free(s->out_buf);
+                if (s->work_buf) {
+                    mem_free(s->work_buf->buffer);
+                    mem_free(s->work_buf);
+                }
+                mem_free(s);
+            } else { // keep alive(inactivate) timeout
+                // it's a raw connection. Do not touch it in there.
+                // We should use connect_pool mgmt it.
             }
-            mem_free(s);
         }
     }
     return;
@@ -167,12 +172,14 @@ void expires_house_keeping(int g_efd, int *pos, myevent_s *g_events,
 {
     int checkpos = *pos;
     int i = 0;
-    for (; i < 100; i++, checkpos++) {
+    //for (; i < 100; i++, checkpos++) {
+    for (; i < MAX_EVENTS + 1; i++, checkpos++) {
         if (checkpos == MAX_EVENTS)
             checkpos = 0;
         if (g_events[checkpos].status != 1)
             continue;
         long duration = now - g_events[checkpos].last_active;
+        //printf("fd: %d, duration: %d\n", g_events[checkpos].fd, duration);
         if (duration >= 10 && except_fd != g_events[checkpos].fd) {
             eventdel(g_efd, &g_events[checkpos]);
             close_stream(g_efd, &g_events[checkpos], 0);

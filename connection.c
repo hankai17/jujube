@@ -14,6 +14,7 @@ void init_connect_pool() {
 
 jconnect* get_connection() {
     struct list_head *cursor = NULL;
+    struct list_head *next_cursor = NULL;
     struct jconnect *tmp_conn = NULL;
     struct jconnect *curr_conn = NULL;
     struct list_head invaild_conn;
@@ -23,14 +24,14 @@ jconnect* get_connection() {
     pthread_mutex_lock(&g_conn_pool_mutex);
     for (cursor = (&g_jconnect)->next; cursor != &g_jconnect;) {
         tmp_conn = (jconnect*)cursor;
+        next_cursor = cursor->next;
+        
         list_del(&tmp_conn->list);
-
         if (!tmp_conn->is_alive) {
             list_add_tail(&tmp_conn->list, &invaild_conn); 
+            cursor = next_cursor;
             continue;
         }
-        // Other TODO
-
         // OK
         curr_conn = tmp_conn;
         break;
@@ -38,19 +39,22 @@ jconnect* get_connection() {
     pthread_mutex_unlock(&g_conn_pool_mutex);
 
     for (cursor = (&invaild_conn)->next; cursor != &invaild_conn;) {
+        next_cursor = cursor->next;
         tmp_conn = (struct jconnect*)cursor;
         close(tmp_conn->fd);
+        free(tmp_conn);
         g_connect_pool.current_total--;
+        cursor = next_cursor;
     }
     return curr_conn;    
 }
 
 void release_connection(jconnect* jc) {
     jc->requests++;
-    if (g_connect_pool.current_total >= g_connect_pool.max_connects ||
-            !jc->is_alive ||
-            jc->requests >= g_connect_pool.max_txn ||
-            jc->create_time + g_connect_pool.max_alive_times >= time(NULL)) {
+    //if (g_connect_pool.current_total >= g_connect_pool.max_connects ||
+            if (!jc->is_alive) { // ||
+            //jc->requests >= g_connect_pool.max_txn ||
+            //jc->create_time + g_connect_pool.max_alive_times >= time(NULL)) {
         close(jc->fd);
         printf("connect pool close it\n");
         free(jc);
@@ -58,8 +62,17 @@ void release_connection(jconnect* jc) {
         return;
     }
     pthread_mutex_lock(&g_conn_pool_mutex);
+    ++g_connect_pool.current_total;
     printf("add to connect pool\n");
     list_add_tail(&jc->list, &g_jconnect);
     pthread_mutex_unlock(&g_conn_pool_mutex);
+}
+
+void release_keepalive_connection(jconnect *jc) {
+    close(jc->fd);
+    list_del(&jc->list);
+    free(jc);
+    --g_connect_pool.current_total;
+    return;
 }
 
