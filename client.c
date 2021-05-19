@@ -20,14 +20,19 @@ static void attach_stream_to_connect(struct jconnect *jc, tcp_stream *s)
     jc->stream = s;
     struct myevent_s* ev;
 
+    // reset connection event && cb
     if (jc->status == BEGIN_CONN) { // a new connection
         ev = evget(g_events, -1);
         eventset(ev, jc, connect_cb, ev);
     } else if (jc->status == CONN_ESTAB) { // a keep-alive connection
         ev = evget(g_events, jc->fd);
         //printf("ev.status: %d\n", ev->status);
-        eventdel(g_efd, ev); // Make sure that EPOLLOUT is add success
-        eventset(ev, jc, data_transfer, ev);
+        if (1) {
+            eventdel(g_efd, ev); // Make sure that EPOLLOUT is add success
+            eventset(ev, jc, data_transfer, ev);
+        } else {
+            event_reset_cb(ev, data_transfer, ev);
+        }
     }
     eventadd(g_efd, EPOLLOUT, ev);
     // TODO
@@ -43,6 +48,7 @@ static void release_stream_from_connect(myevent_s* ev, int is_bad_conn)
     free_transaction_stream(s); 
     jc->stream = NULL;
 
+    // reset connection event
     if (is_bad_conn) {
         ev->jc->is_alive = 0;
         ev->jc->status = CONN_CLOSE;
@@ -99,7 +105,7 @@ static void keepalive_cb(int sock, int read_event,
 
     jc->is_alive = 0;
     eventdel(g_efd, ev);
-    release_keepalive_connection(jc);
+    release_keepalive_connection(jc); // Why list_del?
 }
 
 static int create_transaction(struct transfer_log_entry* log_entry) 
@@ -250,3 +256,6 @@ int main()
     main_loop();
     return 0;
 }
+
+// ev-->jc--->stream
+// 1) 如何确保 inactivate时 ev一直被占着
