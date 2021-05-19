@@ -2,6 +2,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <ctype.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
