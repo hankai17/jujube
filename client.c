@@ -105,7 +105,9 @@ static void keepalive_cb(int sock, int read_event,
 
     jc->is_alive = 0;
     eventdel(g_efd, ev);
-    release_keepalive_connection(jc); // Why list_del?
+    // We had already released conn to list and monitor keepalive 
+    // If err encounter we should del it is list
+    release_keepalive_connection(jc); 
 }
 
 static int create_transaction(struct transfer_log_entry* log_entry) 
