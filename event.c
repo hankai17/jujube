@@ -35,6 +35,12 @@ void eventset(struct myevent_s *ev, struct jconnect *jc,
     return;
 }
 
+/*
+调用组合eventset & eventadd: 即是添加(EPOLL_CTL_ADD)一个新fd的事件 如果树上已经有该fd了会添加失败
+调用组合eventdel & eventset & eventadd: 等价于eventadd ?
+应该做成ppc那样 上层只需关注读写事件 底层根据原始状态做mod/add 即去掉status 加一个unsigned变量记录上次的状态
+*/
+
 void event_reset_cb(struct myevent_s *ev, 
         void (*call_back)(int, int, int, void *), void *arg) {
     ev->call_back = call_back;
@@ -96,7 +102,7 @@ void set_stream_event_in_out(int g_efd, myevent_s *ev)
     }
     //eventdel(g_efd, ev);
     //eventset(ev, ev->fd, ev->si, data_transfer, ev);
-    eventadd(g_efd, rw_type, ev);
+    eventadd(g_efd, rw_type, ev); // 这里直接用modify 代替add
     return;
 }
 

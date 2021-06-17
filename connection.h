@@ -34,6 +34,7 @@ typedef struct jconnect {
 } jconnect;
 
 void init_connect_pool();
+void get_connection_statiscs();
 jconnect* get_connection();
 void release_connection(jconnect* jc);
 void release_keepalive_connection(jconnect *jc);

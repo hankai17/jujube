@@ -12,6 +12,18 @@ void init_connect_pool() {
     INIT_LIST_HEAD(&g_jconnect);
 }
 
+void get_connection_statiscs() {
+    struct list_head *cursor = NULL;
+    int i = 0;
+
+    pthread_mutex_lock(&g_conn_pool_mutex);
+    list_for_each(cursor, &g_jconnect) {
+        i++;
+    }
+    pthread_mutex_unlock(&g_conn_pool_mutex);
+    printf("pool current_total: %d\n", i);
+}
+
 jconnect* get_connection() {
     struct list_head *cursor = NULL;
     struct list_head *next_cursor = NULL;
@@ -56,14 +68,12 @@ void release_connection(jconnect* jc) {
             //jc->requests >= g_connect_pool.max_txn ||
             //jc->create_time + g_connect_pool.max_alive_times >= time(NULL)) {
         close(jc->fd);
-        printf("connect pool close it\n");
         free(jc);
         --g_connect_pool.current_total;
         return;
     }
     pthread_mutex_lock(&g_conn_pool_mutex);
     ++g_connect_pool.current_total;
-    printf("add to connect pool\n");
     list_add_tail(&jc->list, &g_jconnect);
     pthread_mutex_unlock(&g_conn_pool_mutex);
 }
