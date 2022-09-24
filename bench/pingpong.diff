@@ -1,0 +1,348 @@
+diff --git a/Makefile b/Makefile
+index 0750921..b633c9e 100755
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,7 @@
+ CC = gcc
+ #CFLAGS = -Wall -g -DDEBUG_MEM_CHECK
+ #CFLAGS = -g -DDEBUG_MEM_CHECK
+-CFLAGS = -g -DDEBUG_MEM_CHECK -DUSE_FASTLZ
++CFLAGS = -g -O2 -DDEBUG_MEM_CHECK -DUSE_FASTLZ
+ LIBS = -lpthread -pthread
+ 
+ BIN=test
+diff --git a/client.c b/client.c
+old mode 100755
+new mode 100644
+index 9bf9653..19cc4ff
+--- a/client.c
++++ b/client.c
+@@ -1,6 +1,9 @@
+ #include "comm.h"
+ #include "fastlz.h"
+ #include <unistd.h>
++#include <assert.h>
++#include <string.h>
++#include <errno.h>
+ 
+ static myevent_s g_events[MAX_EVENTS + 1];
+ static int g_efd;
+@@ -8,141 +11,26 @@ int tickle_fd[2] = {0};
+ 
+ void main_loop();
+ static int create_transaction(struct transfer_log_entry* log_entry);
+-static void connect_cb(int sock, int read_event, int write_event, void *data);
+-static void keepalive_cb(int sock, int read_event, int write_event, void *data);
+ static void data_transfer(int sock, int read_event, int write_event, void *data);
+-
+-extern struct transfer_log_entry* get_log_entry_from_list();
+-
+-static void attach_stream_to_connect(struct jconnect *jc, tcp_stream *s) 
+-{
+-    jc->stream = s;
+-    struct myevent_s* ev;
+-
+-    // reset connection event && cb
+-    if (jc->status == BEGIN_CONN) { // a new connection
+-        ev = evget(g_events, -1);
+-        eventset(ev, jc, connect_cb, ev);
+-    } else if (jc->status == CONN_ESTAB) { // a keep-alive connection
+-        ev = evget(g_events, jc->fd);
+-        event_reset_cb(ev, data_transfer, ev);
+-    }
+-    eventadd(g_efd, EPOLLOUT, ev);
+-    return;
+-}
+-
+ static void release_stream_from_connect(myevent_s* ev, int is_bad_conn) 
+ {
+-    struct jconnect *jc = ev->jc;
+-    tcp_stream *s = jc->stream;
+-
+-    free_transaction_stream(s); 
+-    jc->stream = NULL;
+-
+-    // reset connection event
+-    if (is_bad_conn) {
+-        ev->jc->is_alive = 0;
+-        ev->jc->status = CONN_CLOSE;
+-        eventdel(g_efd, ev);
+-    } else {
+-        event_reset_cb(ev, keepalive_cb, ev);
+-        eventadd(g_efd, EPOLLIN, ev); 
+-    }
+-    release_connection(jc);
+-}
+-
+-static void connect_cb(int sock, int read_event, 
+-        int write_event, void *data)
+-{
+-    myevent_s *ev = (myevent_s*)data;
+-    struct jconnect *jc = ev->jc;
+-    tcp_stream *s = jc->stream;
+-    assert(sock == s->server_sock);
+-    int ret = 0;
+-    //if (read_event == 1 || write_event == 0) {
+-    if (write_event == 0) {
+-        release_stream_from_connect(ev,  BAD_CONNECT);
+-        return;
+-    }
+-
+-    // Do not judge firstly. We should write & get write's ret
+-    //if(getsockopt(s->server_sock, SOL_SOCKET,SO_ERROR,&error,&n) < 0) {
+-    //    return;
+-    //}
+-
+-    if (write_event) {
+-        event_reset_cb(ev, data_transfer, ev);
+-        eventadd(g_efd, EPOLLOUT, ev);
+-    }
+-}
+-
+-static void keepalive_cb(int sock, int read_event, 
+-        int write_event, void *data) {
+-    int error;
+-    int n;
+-    myevent_s *ev = (myevent_s*)data;
+-    struct jconnect *jc = ev->jc;
+-    tcp_stream *s = jc->stream;
+-
+-    if(getsockopt(sock, SOL_SOCKET,SO_ERROR, &error,&n) < 0) {
+-        //printf("keeplive read err\n");    
+-    }
+-
+-    jc->is_alive = 0;
+     eventdel(g_efd, ev);
+-    // We had already released conn to list and monitor keepalive 
+-    // If err encounter we should del it is list
+-    release_keepalive_connection(jc); 
+ }
+ 
+-static int create_transaction(struct transfer_log_entry* log_entry) 
+-{
+-    int r = 0;
+-    int sock = 0;
+-    char prefix_len[8] = {0};
+-
+-    char fast_compress_buff[512] = {0};
+-    #if 0
+-    uint64_t compress_ret = fastlz_compress_level(2, log_entry->gather_logmsg, log_entry->msg_len, fast_compress_buff);
+-    memcpy(prefix_len, &compress_ret, sizeof(uint64_t));
+-    #else
+-    uint64_t compress_ret = 512;
+-    memcpy(prefix_len, &compress_ret, sizeof(uint64_t));
+-    #endif
+-
+-    struct sockaddr_storage peeraddr;
+-    jujube_in_addr jaddr;
+-    memset(&peeraddr, 0x0, sizeof(struct sockaddr_storage));
+-    memcpy(&jaddr, &log_entry->ip, sizeof(struct jujube_in_addr));
+-
+-    struct jconnect* jc = get_connection();
+-    if (jc == NULL) {
+-        int size = sizeof(struct jconnect);
+-        jc = (jconnect*)malloc(size);
+-        if (jc == NULL) {
+-            goto end;
+-        }
+-        sock = create_connect_socket(&peeraddr, jaddr, log_entry->ip.flag, log_entry->port);
+-        if (sock < 0) {
+-            goto end;
+-        }
+-        jc->fd = sock;
+-        jc->is_alive = 0;
+-        jc->status = BEGIN_CONN;
+-    } else {
+-    }
+-    #if 0
+-    tcp_stream *s = new_transaction_stream(&peeraddr, jc->fd, prefix_len, fast_compress_buff, compress_ret);
+-    #else
+-    tcp_stream *s = new_transaction_stream(&peeraddr, jc->fd, prefix_len, log_entry->gather_logmsg, compress_ret);
+-    #endif
+-    attach_stream_to_connect(jc, s);
++static int *pipes;
++static int num_pipes = 5000;
+ 
+-end:
+-    if (log_entry) {
+-        free(log_entry);
+-    }
+-    return 0;
++static int create_pipes() 
++{
++    int i;
++	int *cp, space;
++	pipes = calloc(num_pipes * 2, sizeof(int));
++	for (cp = pipes, i = 0; i < num_pipes; i++, cp += 2) {
++		if (pipe(cp) == -1) {
++			perror("pipe");
++			exit(1);
++		}
++	}
+ }
+ 
+ void main_loop() {
+@@ -158,32 +46,26 @@ void main_loop() {
+         return;
+     }
+     int next_time = 0;
++    if (1) {
++	    int *cp, space;
++        create_pipes();
++	    for (cp = pipes, i = 0; i < num_pipes; i++, cp += 2) {
++            myevent_s* ev = evget(g_events, -1);
++            if (ev == NULL) {
++                //assert(0);
++            }
++            eventset_fd(ev, cp[0],  data_transfer, ev, i);
++            eventadd(g_efd, EPOLLIN, ev);
++            //printf("add epoll fd: %d\n", ev->fd);
++	    }
++        //int r = send(cp[1], "e", 1, 0);
++        int r = write(pipes[1], "e", 1);
++        //printf("r: %d, errno: %s\n", r, strerror(errno));
++    }
+ 
+     while(1) {
+-        long now = time(NULL);
+-        /*
+-        struct transfer_log_entry* log_entry = NULL; //get_log_entry_from_list();
+-        if (log_entry) {
+-            create_transaction(log_entry); // ret TODO
+-        }
+-        */
+-
+-        if (now >= next_time) {
+-            struct transfer_log_entry* log_entry = 
+-                    (struct transfer_log_entry*)malloc(sizeof(struct transfer_log_entry));
+-            char msg[512] = "1234567890abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz";   
+-            char ip_buf[64] = "192.168.104.159";
+-            check_host_ip_and_get_verion(ip_buf, &log_entry->ip);
+-            log_entry->proto = 1;
+-            log_entry->port = htons(9527);
+-            log_entry->msg_len = strlen(msg);
+-            memcpy(log_entry->gather_logmsg, msg, strlen(msg)); 
+-            
+-            create_transaction(log_entry);
+-            next_time = now + 1;
+-        }
+-
+-        expires_house_keeping(g_efd, &checkpos, g_events, now, tickle_fd[0]);
++        //long now = time(NULL);
++        //expires_house_keeping(g_efd, &checkpos, g_events, now, tickle_fd[0]);
+         int nfd = epoll_wait(g_efd, events, MAX_EVENTS + 1, 1000);
+         if (nfd < 0 && errno != EINTR) {
+             break;
+@@ -206,42 +88,30 @@ void main_loop() {
+ static void data_transfer(int sock, int read_event, int write_event, void *data) {
+     //printf("socket: %d, data_transfer read_event: %d, write_event: %d\n", 
+     //        sock, read_event, write_event);
++	static struct timeval ts, te;
+     myevent_s *ev = (myevent_s*)data;
+-    tcp_stream *s = ev->jc->stream;
+-    assert(sock == s->server_sock);
+     if (read_event == 0 && write_event == 0) {
+         release_stream_from_connect(ev,  BAD_CONNECT);
+         return;
+     }
+     int ret = 0;
+-
+-    if (write_event) {
+-        if((ret = stream_flush_out(s, -1)) < 0) {
++    if (read_event) {
++        char buf[1] = {0};
++        if (read(ev->fd, buf, 1) < 0) {
+             release_stream_from_connect(ev,  BAD_CONNECT);
+-            return;
+         }
+-
+-        ev->jc->is_alive = 1;
+-        ev->jc->status = CONN_ESTAB;
+-
+-        if (buf_data_size(s->in_buf) == 0) {
+-            //printf("send data done\n");
+-            //release_stream_from_connect(ev,  OK_CONNECT);
+-            release_stream_from_connect(ev,  BAD_CONNECT);
+-            return;
++        if (ev->idx == 0) {
++	        gettimeofday(&ts, NULL);
+         }
+-    }
+-
+-    if (read_event) {
+-        if((stream_feed_out(s)) < 0) {
+-            release_stream_from_connect(ev,  BAD_CONNECT);
++        if (ev->idx == num_pipes - 1) {
++	        gettimeofday(&te, NULL);
++	        timersub(&te, &ts, &te);
++            //printf("ev->idx: %d, buf: %s\n", ev->idx, buf);
++		    fprintf(stdout, "%ld\n", te.tv_sec * 1000000L + te.tv_usec);
+         } else {
+-            release_stream_from_connect(ev,  BAD_CONNECT);
++            write(pipes[(ev->idx + 1) * 2 + 1], buf, 1);
+         }
+-        return;
+     }
+-
+-    set_stream_event_in_out(g_efd, ev);
+ }
+ 
+ int main()
+diff --git a/comm.h b/comm.h
+index af270fb..a4b78d2 100755
+--- a/comm.h
++++ b/comm.h
+@@ -30,7 +30,7 @@
+ #define LOG_MAX_LEN  1024*32
+ #define cfg_http_buf_size (8*1024)
+ #define mid_http_buf_size (64*1024)
+-#define MAX_EVENTS  1024
++#define MAX_EVENTS  1024 * 20
+ 
+ #define OK_CONNECT 0
+ #define BAD_CONNECT 1
+diff --git a/event.c b/event.c
+index 292e1d7..666a7a2 100644
+--- a/event.c
++++ b/event.c
+@@ -22,6 +22,19 @@ myevent_s* evget(myevent_s *g_events, int fd)
+     return ev;
+ }
+ 
++void eventset_fd(struct myevent_s *ev, int fd,
++              void (*call_back)(int, int, int, void *), void *arg, int idx)
++{
++    ev->fd = fd;
++    ev->call_back = call_back;
++    ev->events = 0;
++    ev->arg = arg;
++    ev->status = 0;
++    ev->last_active = time(NULL);
++    ev->idx = idx;
++    return;
++}
++
+ void eventset(struct myevent_s *ev, struct jconnect *jc,
+               void (*call_back)(int, int, int, void *), void *arg)
+ {
+diff --git a/event.h b/event.h
+index 6976be0..1de736f 100644
+--- a/event.h
++++ b/event.h
+@@ -13,6 +13,7 @@ typedef struct myevent_s {
+     long last_active;
+     timeout_handler_t *thandler;
+     struct jconnect *jc;
++    int idx;
+ } myevent_s;
+ 
+ myevent_s* evget(myevent_s *g_events, int fd/*is_create*/);
+@@ -29,6 +30,8 @@ void close_stream(int g_efd, myevent_s* ev, int reason);
+ void expires_house_keeping(int g_efd, int *pos, myevent_s *g_events, long now, int except_fd);
+ void init_listensocket(int efd, short port, myevent_s *g_events,
+                        jujube_in_addr *jaddr, void (*call_back)(int, int, int, void *));
++void eventset_fd(struct myevent_s *ev, int fd,
++              void (*call_back)(int, int, int, void *), void *arg, int idx);
+ 
+ #endif
+ 
