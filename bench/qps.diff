@@ -1,0 +1,331 @@
+diff --git a/Makefile b/Makefile
+index fb24447..1ecc5cd 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,6 +1,6 @@
+ CC = gcc
+-CFLAGS = -Wall -g -DDEBUG_MEM_CHECK
+-LIBS = -lpthread -pthread
++CFLAGS = -Wall -g -O2 #-DDEBUG_MEM_CHECK
++LIBS = -lpthread -pthread -ljemalloc
+ 
+ all: jujube_client jujube_server
+ 
+diff --git a/base.c b/base.c
+index a496d3f..63f0005 100644
+--- a/base.c
++++ b/base.c
+@@ -17,6 +17,7 @@
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
++#include <jemalloc/jemalloc.h>
+ 
+ #include "buf.h"
+ #include "mem.h"
+@@ -24,7 +25,8 @@
+ int sys_start;
+ #define cfg_http_buf_size (8*1024) 
+ #define mid_http_buf_size (64*1024) 
+-#define MAX_EVENTS  1024
++#define MAX_EVENTS  1024 * 4
++#define SERV_IP "127.0.0.1"
+ 
+ typedef struct tcp_stream {
+ 	time_t data_start;
+@@ -141,6 +143,9 @@ void init_main_loop() {
+     return;
+ }
+ 
++int g_max_client = 20;
++int g_cur_client = 0;
++
+ void* main_loop(void* arg) {
+     //pthread_setname_np(pthread_self(), "main_loop");
+     g_efd = epoll_create(MAX_EVENTS + 1);
+@@ -155,13 +160,14 @@ void* main_loop(void* arg) {
+ 
+     while(1) {
+         long now = time(NULL);
+-        if(sys_start && next_run_time <= now) {
++        //if(sys_start && next_run_time <= now) {
++        while (g_cur_client < g_max_client) {
+             unsigned long lbe_ip = 0;
+-            unsigned short lbe_port = 80;
++            unsigned short lbe_port = 9527;
+             create_socket(lbe_ip, ntohs(lbe_port));
+-            next_run_time = now + 10;
+         }
+ 
++        /*
+         for (i = 0; i < 100; i++, checkpos++) {
+             if (checkpos == MAX_EVENTS)
+                 checkpos = 0;
+@@ -172,8 +178,10 @@ void* main_loop(void* arg) {
+                 printf("siteinfo_download fd: %d, timeout\n", g_events[checkpos].fd);
+                 eventdel(g_efd, &g_events[checkpos]);
+                 close_stream(&g_events[checkpos], 0);
++                g_cur_client--;
+             }
+         }
++        */
+ 
+         int nfd = epoll_wait(g_efd, events, MAX_EVENTS + 1, 1000);
+         if (nfd < 0 && errno != EINTR) {
+@@ -233,10 +241,10 @@ static void eventadd(int efd, int events, struct myevent_s *ev) {
+     }
+ 
+     if (epoll_ctl(efd, op, ev->fd, &epv) < 0) {
+-        printf("eventadd failed fd: %d, events: %d, op: %d, err: %s\n", ev->fd, events, op,  xstrerror());
++        //printf("eventadd failed fd: %d, events: %d, op: %d, err: %s\n", ev->fd, events, op,  xstrerror());
+     } else {
+         ;
+-        printf("eventadd OK [fd=%d], op=%d, events[%0X]\n", ev->fd, op, events);
++        //printf("eventadd OK [fd=%d], op=%d, events[%0X]\n", ev->fd, op, events);
+     }
+ 
+     return;
+@@ -251,10 +259,10 @@ static void eventdel(int efd, struct myevent_s *ev) {
+     epv.data.ptr = ev;
+     ev->status = 0;
+     if(epoll_ctl(efd, EPOLL_CTL_DEL, ev->fd, &epv) < 0) {
+-        printf("eventdell fd: %d, err: %s\n", ev->fd, xstrerror());
++        //printf("eventdell fd: %d, err: %s\n", ev->fd, xstrerror());
+     } else {
+         ;
+-        printf("eventdell fd: %d, ok\n", ev->fd);
++        //printf("eventdell fd: %d, ok\n", ev->fd);
+     }
+ 
+     return;
+@@ -289,8 +297,13 @@ static tcp_stream* stream_create(int sock, struct sockaddr_in* paddr) {
+     return s;
+ }
+ 
+-static void format_request(char* buf, int len, unsigned long lbe_ip, unsigned short lbe_port) {
+-    return;
++static int format_request(char* buf, int len, unsigned long lbe_ip, unsigned short lbe_port) {
++    const char* str = "hello world";
++    uint64_t slen = strlen(str);
++    memcpy(buf, &slen, sizeof(slen));
++    buf += sizeof(slen);
++    memcpy(buf, str, slen);
++    return sizeof(uint64_t) + slen;
+ }
+ 
+ static int create_socket(unsigned long lbe_ip, unsigned short lbe_port) {
+@@ -299,12 +312,12 @@ static int create_socket(unsigned long lbe_ip, unsigned short lbe_port) {
+     struct sockaddr_in peeraddr;
+     char siteinfo_req[1024] = {0};
+ 
+-    format_request(siteinfo_req, sizeof(siteinfo_req) - 1, lbe_ip, lbe_port);
++    int slen = format_request(siteinfo_req, sizeof(siteinfo_req) - 1, lbe_ip, lbe_port);
+ 
+     memset(&peeraddr, 0, sizeof(peeraddr));
+     peeraddr.sin_family = AF_INET;
+-    peeraddr.sin_addr.s_addr = lbe_ip;	
+-    peeraddr.sin_port = htons(lbe_port);
++    inet_pton(AF_INET, SERV_IP, &peeraddr.sin_addr.s_addr);   
++    peeraddr.sin_port = htons(9527);
+ 
+     sock = socket(AF_INET,SOCK_STREAM,0);
+     if(sock < 0) {
+@@ -323,7 +336,7 @@ static int create_socket(unsigned long lbe_ip, unsigned short lbe_port) {
+     eventset(ev, sock, s, data_transfer, ev);
+     eventadd(g_efd, EPOLLOUT, ev);
+ 
+-    buf_put(s->in_buf, siteinfo_req, strlen(siteinfo_req));
++    buf_put(s->in_buf, siteinfo_req, slen);
+ 
+     if(comm_set_nonblock(sock) < 0) {
+         printf("create_socket: comm_set_nonblock failed: %s\n", xstrerror());
+@@ -336,7 +349,8 @@ static int create_socket(unsigned long lbe_ip, unsigned short lbe_port) {
+         close_stream(ev,  3);
+         return 0;
+     }
+-    printf("create_socket to transfer data\n");
++    g_cur_client++;
++    //printf("create_socket to transfer data\n");
+     return 0;
+ }
+ 
+@@ -409,7 +423,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
+ 
+     if(write_event) { //send req
+         if(stream_flush_out(s, -1) < 0) {
+-            printf("data_transfer: lbe close when send req\n");
++            //printf("data_transfer: lbe close when send req\n");
+             close_stream(ev, 4);
+             return;
+         }
+@@ -419,7 +433,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
+         assert(buf_data_size(s->out_buf) == 0);
+         if((stream_feed_out(s)) < 0) { //peer closed or other err
+             if(buf_data_size(s->out_buf) == 0) {
+-                printf("data_transfer: lbe closed and buf data size is 0\n");
++                //printf("data_transfer: lbe closed and buf data size is 0\n");
+                 close_stream(ev, 3);
+                 return;
+             }
+@@ -485,8 +499,9 @@ static void download_set_event_in_out(myevent_s *ev) {
+ static void close_stream(myevent_s* ev, int reason) {
+     if(ev != NULL) {
+         tcp_stream* s = ev->stream;
+-        printf("siteinfo_download close_stream, s->reply_body_size_left: %ld\n", 
+-              s->reply_body_size_left);
++        //printf("siteinfo_download close_stream, s->reply_body_size_left: %ld\n", 
++        //      s->reply_body_size_left);
++        g_cur_client--;
+         if(s->server_sock >= 0) {
+             eventdel(g_efd, ev);
+             close(ev->fd);
+@@ -505,5 +520,11 @@ static void close_stream(myevent_s* ev, int reason) {
+ 
+ int main()
+ {
++    mem_module_init();
++    sys_start = 1;
++    main_loop(NULL);
++    while(1) {
++        sleep(1);
++    }
+     return 0;
+ }
+diff --git a/mem.c b/mem.c
+index cc46bcf..7011230 100644
+--- a/mem.c
++++ b/mem.c
+@@ -211,6 +211,7 @@ int statistics_mem_info(char buff[], size_t buff_sz)
+ 
+ void *  mem_realloc(void *buf, size_t old_size ,size_t new_size)
+ {
++    /*
+ 	mem_entry_t * me = (mem_entry_t *)((char *)buf - offsetof(mem_entry_t, obj));
+ 	
+ 	void* new_buf = mem_alloc(me->module, new_size);
+@@ -220,6 +221,8 @@ void *  mem_realloc(void *buf, size_t old_size ,size_t new_size)
+ 	}
+ 	mem_free(buf);	
+ 	return new_buf;
++    */
++    return NULL;
+ }
+ 
+ #ifdef DEBUG_MEM_CHECK
+diff --git a/server.c b/server.c
+index 7a7a010..33f607f 100644
+--- a/server.c
++++ b/server.c
+@@ -24,7 +24,7 @@
+ int sys_start;
+ #define cfg_http_buf_size (8*1024) 
+ #define mid_http_buf_size (64*1024) 
+-#define MAX_EVENTS  1024
++#define MAX_EVENTS  1024 * 4
+ typedef void timeout_handler_t(int, void *);
+ 
+ typedef struct tcp_stream {
+@@ -185,7 +185,7 @@ void accept_conn(int lfd, int read_events, int write_event, void *arg)
+ 
+     } while(0);
+ 
+-    printf("new connect [%s:%d][time:%ld], pos[%d]\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port), g_events[i].last_active, i);
++    //printf("new connect [%s:%d][time:%ld], pos[%d]\n", inet_ntoa(cin.sin_addr), ntohs(cin.sin_port), g_events[i].last_active, i);
+     return;
+ }
+ 
+@@ -219,6 +219,9 @@ int init_main_loop() {
+     return tid;
+ }
+ 
++int g_cur_sum_reqs = 0;
++int g_last_sum_reqs = 0;
++
+ void* main_loop(void* arg) {
+     //pthread_setname_np(pthread_self(), "server_main_loop");
+     g_efd = epoll_create(MAX_EVENTS + 1);
+@@ -241,6 +244,12 @@ void* main_loop(void* arg) {
+             sleep(1);
+         }
+ 
++        if (now >= next_run_time) {
++            printf("qps: %d\n", g_cur_sum_reqs - g_last_sum_reqs);
++            g_last_sum_reqs = g_cur_sum_reqs;
++            next_run_time = now + 1;
++        }
++        /*
+         for (i = 0; i < 100; i++, checkpos++) {
+             if (checkpos == MAX_EVENTS)
+                 checkpos = 0;
+@@ -248,19 +257,20 @@ void* main_loop(void* arg) {
+                 continue;
+             long duration = now - g_events[checkpos].last_active;
+             if (duration >= 10) {
+-                printf("siteinfo_download fd: %d, timeout\n", g_events[checkpos].fd);
++                //printf("siteinfo_download fd: %d, timeout\n", g_events[checkpos].fd);
+                 //eventdel(g_efd, &g_events[checkpos]);
+                 //close_stream(&g_events[checkpos], 0);
+                 g_events[checkpos].thandler(1, g_events[checkpos].stream);
+             }
+         }
++        */
+         int nfd = epoll_wait(g_efd, events, MAX_EVENTS + 1, 1000);
+         if (nfd < 0 && errno != EINTR) {
+             printf("epoll_wait err %s, errno: %d\n", strerror(errno), errno);
+             break;
+         }
+ 
+-        printf("debug...epoll_wait ret: %d\n", nfd);
++        //printf("debug...epoll_wait ret: %d\n", nfd);
+         for (i = 0; i < nfd; i++) {
+             struct myevent_s *ev = (struct myevent_s *)events[i].data.ptr;
+             ev->call_back(ev->fd, events[i].events & EPOLLIN ? 1 : 0, events[i].events & EPOLLOUT ? 1 : 0, ev->arg);
+@@ -313,10 +323,10 @@ static void eventadd(int efd, int events, struct myevent_s *ev) {
+     }
+ 
+     if (epoll_ctl(efd, op, ev->fd, &epv) < 0) {
+-        printf("eventadd failed fd: %d, events: %d, op: %d, err: %s\n", ev->fd, events, op,  xstrerror());
++        //printf("eventadd failed fd: %d, events: %d, op: %d, err: %s\n", ev->fd, events, op,  xstrerror());
+     } else {
+         ;
+-        printf("eventadd OK [fd=%d], op=%d, events[%0X]\n", ev->fd, op, events);
++        //printf("eventadd OK [fd=%d], op=%d, events[%0X]\n", ev->fd, op, events);
+     }
+ 
+     return;
+@@ -331,10 +341,10 @@ static void eventdel(int efd, struct myevent_s *ev) {
+     epv.data.ptr = ev;
+     ev->status = 0;
+     if(epoll_ctl(efd, EPOLL_CTL_DEL, ev->fd, &epv) < 0) {
+-        printf("eventdell fd: %d, err: %s\n", ev->fd, xstrerror());
++        //printf("eventdell fd: %d, err: %s\n", ev->fd, xstrerror());
+     } else {
+         ;
+-        printf("eventdell fd: %d, ok\n", ev->fd);
++        //printf("eventdell fd: %d, ok\n", ev->fd);
+     }
+ 
+     return;
+@@ -532,7 +542,7 @@ static void data_transfer(int sock, int read_event, int write_event, void *data)
+             }
+             s->reply_body_size_left = *((uint64_t*)s->out_buf->buffer);
+             buf_pick(s->out_buf, sizeof(uint64_t));
+-            printf("data_transfer start, sum_size: %ld\n", s->reply_body_size_left);
++            //printf("data_transfer start, sum_size: %ld\n", s->reply_body_size_left);
+ 
+             if(s->reply_body_size_left > 0) {
+                 s->reply_body_size_left -= buf_data_size(s->out_buf);
+@@ -576,8 +586,11 @@ static void download_set_event_in_out(myevent_s *ev) {
+ static void close_stream(myevent_s* ev, int reason) {
+     if(ev != NULL) {
+         tcp_stream* s = ev->stream;
+-        printf("siteinfo_download close_stream, s->reply_body_size_left: %ld\n", 
+-              s->reply_body_size_left);
++        //printf("siteinfo_download close_stream, s->reply_body_size_left: %ld\n", 
++        //      s->reply_body_size_left);
++        if (reason == 1) {
++            g_cur_sum_reqs++;
++        }
+         if(s->server_sock >= 0) {
+             eventdel(g_efd, ev);
+             close(ev->fd);
